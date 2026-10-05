@@ -1,0 +1,15 @@
+{
+  "name": "my-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "backend/app.js",
+  "scripts": {
+    "start": "node backend/app.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "pg": "^8.23.1"
+  }
+}
