@@ -27,6 +27,12 @@ DATABASE_SETTINGS = {
     "user": os.environ.get("PGUSER", "postgres"),
     "password": os.environ.get("PGPASSWORD"),
 }
+# Comma-separated deployed frontend origins, e.g. https://your-site.netlify.app
+FRONTEND_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get("FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+]
 PASSWORD_HASH_ITERATIONS = 310_000
 SESSION_LIFETIME = timedelta(hours=12)
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -302,6 +308,8 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:5500",
         "http://localhost:5500",
+        "https://stately-capybara-b8b8f1.netlify.app",
+        *FRONTEND_ORIGINS,
     ],
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
