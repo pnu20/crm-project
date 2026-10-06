@@ -32,14 +32,7 @@ const pool = new Pool({
 });
 
 app.use(express.json({ limit: '1mb' }));
-app.use(cors({
-  origin: [
-    'http://127.0.0.1:8000',
-    'http://localhost:8000',
-    'http://127.0.0.1:5500',
-    'http://localhost:5500',
-  ],
-}));
+app.use(cors());
 
 async function initializeDatabase() {
   await pool.query(`
