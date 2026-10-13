@@ -105,6 +105,22 @@ class LoginInput(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+# Request data for editing the signed-in account's profile.
+class ProfileInput(BaseModel):
+    """Validate the name and email shown in account settings."""
+
+    fullName: str = Field(min_length=2, max_length=120)
+    email: str = Field(min_length=3, max_length=254)
+
+
+# Request data for replacing the signed-in account's password.
+class PasswordChangeInput(BaseModel):
+    """Validate the current password and its replacement."""
+
+    currentPassword: str = Field(min_length=1, max_length=128)
+    newPassword: str = Field(min_length=12, max_length=128)
+
+
 # Hash passwords with a unique salt before storing them in PostgreSQL.
 def hash_password(password: str) -> str:
     """Return a salted PBKDF2-SHA256 password hash."""
@@ -300,7 +316,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Fieldnote CRM API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Withaq CRM API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -309,6 +325,8 @@ app.add_middleware(
         "http://127.0.0.1:5500",
         "http://localhost:5500",
         "https://stately-capybara-b8b8f1.netlify.app",
+        "https://withaq.me",
+        "https://www.withaq.me",
         *FRONTEND_ORIGINS,
     ],
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -386,6 +404,53 @@ def login(payload: LoginInput) -> dict[str, object]:
 def current_account(user: dict[str, object] = Depends(require_user)) -> dict[str, object]:
     """Return the profile associated with the caller's valid session."""
     return user
+
+
+@app.put("/api/auth/me")
+# Update the signed-in account's display name and sign-in email.
+def update_account(
+    payload: ProfileInput, user: dict[str, object] = Depends(require_user)
+) -> dict[str, object]:
+    """Save profile changes and return the updated account."""
+    email = payload.email.strip().lower()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    full_name = payload.fullName.strip()
+    try:
+        with connect() as connection:
+            connection.execute(
+                "UPDATE users SET full_name = %s, email = %s WHERE id = %s",
+                (full_name, email, user["id"]),
+            )
+    except psycopg.errors.UniqueViolation as error:
+        raise HTTPException(status_code=409, detail="Email is already in use") from error
+    return {"id": user["id"], "fullName": full_name, "email": email}
+
+
+@app.post("/api/auth/change-password", status_code=status.HTTP_204_NO_CONTENT)
+# Replace the password after confirming the current one.
+def change_password(
+    payload: PasswordChangeInput,
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    user: dict[str, object] = Depends(require_user),
+) -> Response:
+    """Store the new password hash and revoke every other session."""
+    token_hash = hashlib.sha256(credentials.credentials.encode("utf-8")).hexdigest()
+    with connect() as connection:
+        stored = connection.execute(
+            "SELECT password_hash FROM users WHERE id = %s", (user["id"],)
+        ).fetchone()
+        if stored is None or not verify_password(payload.currentPassword, stored["password_hash"]):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        connection.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(payload.newPassword), user["id"]),
+        )
+        connection.execute(
+            "DELETE FROM sessions WHERE user_id = %s AND token_hash <> %s",
+            (user["id"], token_hash),
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)

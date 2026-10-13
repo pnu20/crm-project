@@ -26,3 +26,7 @@
     .date-range-select{min-width:104px;padding:0;border:0;outline:0;background:transparent;color:inherit;font:inherit;cursor:pointer;appearance:none}.date-range-select:focus-visible{outline:2px solid #859b66;outline-offset:3px;border-radius:2px}
     @media(max-width:500px){.date-range-select{min-width:88px}}
   
+
+    .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding-bottom:32px}.settings-panel{padding:18px}.settings-form{margin-top:16px}.settings-actions{grid-column:1/-1;display:flex;justify-content:flex-end;padding-top:4px}.settings-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.settings-form select{padding:0 9px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2378817e' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center}html[dir="rtl"] .settings-form select{background-position:left 10px center}
+    @media(max-width:900px){.settings-grid{grid-template-columns:1fr}}
+    @media(max-width:500px){.settings-form{grid-template-columns:1fr}.settings-panel{padding:14px}}

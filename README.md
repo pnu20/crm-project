@@ -1,6 +1,19 @@
-# Fieldnote CRM
+# Withaq CRM
 
 The project is split into a static frontend and a FastAPI backend. The API stores accounts, contacts, deals, tasks, and sessions in PostgreSQL, using the `PG*` settings in `.env` (copy `.env.example` to start). The browser stores the language preference and the current tab's session token.
+
+In production, everything runs on the AWS Lightsail server behind Nginx at `https://withaq.me`: Nginx serves `frontend/` and forwards `/api/` to the FastAPI service, which uses a PostgreSQL database on the same server. The frontend calls `/api` on its own domain, and `http://127.0.0.1:8001/api` when opened on localhost.
+
+## Deploy to Lightsail
+
+On the server, from the project directory:
+
+```bash
+git pull
+sudo bash scripts/deploy_lightsail.sh
+```
+
+The script installs the required packages, creates the local database (copying the data from the previous remote database if `.env` pointed at one), runs the API as the `withaq-api` systemd service on `127.0.0.1:8001`, and configures Nginx. Run it again after each `git pull` to apply updates.
 
 The Node entry point is `backend/app.js`. It uses Express and the PostgreSQL pool in `backend/db.js`; `/api/health` checks the process and `/` (the root URL) verifies the PostgreSQL connection.
 
