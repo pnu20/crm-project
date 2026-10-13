@@ -163,8 +163,11 @@ fi
 
 # ---------------------------------------------------------------- nginx
 log "Configuring Nginx for $DOMAIN"
-SITE_FILE="$(grep -rlE "server_name[^;]*\b${DOMAIN//./\\.}\b" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -n1 || true)"
-[[ -n "$SITE_FILE" ]] || die "No Nginx server block with server_name $DOMAIN found."
+# -R follows the symlinks in sites-enabled; fall back to the file that already proxies /api/.
+NGINX_PATHS=(/etc/nginx/sites-enabled/ /etc/nginx/conf.d/ /etc/nginx/nginx.conf)
+SITE_FILE="$(grep -RlE "server_name[^;]*\b${DOMAIN//./\\.}\b" "${NGINX_PATHS[@]}" 2>/dev/null | head -n1 || true)"
+[[ -n "$SITE_FILE" ]] || SITE_FILE="$(grep -RlE "location\s+(\^~\s+)?/api/?\s*\{" "${NGINX_PATHS[@]}" 2>/dev/null | head -n1 || true)"
+[[ -n "$SITE_FILE" ]] || die "No Nginx config for $DOMAIN found. Send the output of: sudo nginx -T | grep -n -E 'server_name|listen|# configuration file'"
 SITE_FILE="$(readlink -f "$SITE_FILE")"
 cp "$SITE_FILE" "/root/nginx-$(basename "$SITE_FILE")-$STAMP.bak"
 echo "   Site file: $SITE_FILE (backup in /root/)"
