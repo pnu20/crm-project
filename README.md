@@ -54,6 +54,12 @@ npm start
 
 It listens on `http://127.0.0.1:3000`.
 
+## withaqChat
+
+The **withaqChat** item in the sidebar opens a chat assistant that carries out CRM tasks through conversation: adding, editing, and deleting contacts, creating deals and moving them between stages, and creating and completing tasks. It asks for any details it needs before acting, and asks for confirmation before deleting a contact.
+
+The backend's `/api/chat` route sends the conversation to Google Gemini (`gemini-flash-latest` by default; set `GEMINI_MODEL` to change it) and runs the requested actions with the same functions as the REST routes. Set `GEMINI_API_KEY` in `.env` to enable it; keys are created in Google AI Studio. Conversations are kept in the API process's memory for 12 hours, so restarting the API starts them over.
+
 ## Sign in
 
 On first launch, create the administrator account. Passwords must be at least 12 characters. After setup, the CRM requires that account to sign in; public account creation is disabled. Sessions expire after 12 hours, and signing out revokes the current session.

@@ -2,21 +2,27 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
+import random
 import secrets
+import threading
 from contextlib import asynccontextmanager, contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from google import genai
+from google.genai import errors as genai_errors, types as genai_types
+import httpx
 import psycopg
 from dotenv import load_dotenv
 from psycopg.rows import dict_row
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -641,3 +647,357 @@ def update_task_status(
     if result.rowcount == 0 or row is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return row
+
+
+# withaqChat: a Gemini agent that carries out CRM tasks through conversation.
+# Override with GEMINI_MODEL in .env; the default alias always points at the newest Flash model.
+CHAT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+CHAT_MAX_TOOL_ROUNDS = 10
+CHAT_CONVERSATION_LIFETIME = timedelta(hours=12)
+CHAT_MAX_CONVERSATIONS = 500
+CONTACT_STATUSES = ["Lead", "Customer", "Partner"]
+DEAL_STAGES = ["Lead", "Qualified", "Proposal", "Won"]
+CONTACT_TONES = ["tone-green", "tone-coral", "tone-blue", "tone-lilac"]
+# Tools that change CRM records; the frontend reloads its data after any of them run.
+CHAT_WRITE_TOOLS = {
+    "create_contact", "update_contact", "delete_contact",
+    "create_deal", "update_deal_stage", "create_task", "set_task_done",
+}
+CONTACT_FIELDS = {
+    "firstName": {"type": "string", "description": "First name."},
+    "lastName": {"type": "string", "description": "Last name."},
+    "email": {"type": "string", "description": "Email address."},
+    "phone": {"type": "string", "description": "Phone number."},
+    "company": {"type": "string", "description": "Company name."},
+    "role": {"type": "string", "description": "Job title."},
+    "status": {"type": "string", "enum": CONTACT_STATUSES, "description": "Relationship status."},
+    "lastContact": {"type": "string", "description": "Date of the last contact, YYYY-MM-DD."},
+}
+CHAT_TOOLS = [
+    {
+        "name": "list_contacts",
+        "description": "List CRM contacts. Use it to find a contact's id before editing or deleting, to check for duplicates before creating, and to answer questions about contacts.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional text matched against any contact field (name, company, email, ...)."},
+                "status": {"type": "string", "enum": CONTACT_STATUSES, "description": "Optional status filter."},
+            },
+        },
+    },
+    {
+        "name": "create_contact",
+        "description": "Create a contact. firstName and lastName are required; status defaults to Lead and lastContact to today.",
+        "parameters": {
+            "type": "object",
+            "properties": CONTACT_FIELDS,
+            "required": ["firstName", "lastName"],
+        },
+    },
+    {
+        "name": "update_contact",
+        "description": "Change fields on an existing contact. Pass only the fields that change; the rest are kept.",
+        "parameters": {
+            "type": "object",
+            "properties": {"contactId": {"type": "string", "description": "The contact's id from list_contacts."}, **CONTACT_FIELDS},
+            "required": ["contactId"],
+        },
+    },
+    {
+        "name": "delete_contact",
+        "description": "Permanently delete a contact. Only call this after the user has explicitly confirmed the deletion of that specific contact.",
+        "parameters": {
+            "type": "object",
+            "properties": {"contactId": {"type": "string", "description": "The contact's id from list_contacts."}},
+            "required": ["contactId"],
+        },
+    },
+    {
+        "name": "list_deals",
+        "description": "List deals (sales opportunities) with their stage and value in USD.",
+        "parameters": {
+            "type": "object",
+            "properties": {"stage": {"type": "string", "enum": DEAL_STAGES, "description": "Optional stage filter."}},
+        },
+    },
+    {
+        "name": "create_deal",
+        "description": "Create a deal. The value is stored in USD.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Deal name, e.g. Website redesign."},
+                "contact": {"type": "string", "description": "Full name of the related contact, as stored in the CRM. Empty if none."},
+                "valueUsd": {"type": "number", "description": "Deal value in US dollars (convert SAR by dividing by 3.75)."},
+                "stage": {"type": "string", "enum": DEAL_STAGES, "description": "Pipeline stage; defaults to Lead."},
+            },
+            "required": ["name", "valueUsd"],
+        },
+    },
+    {
+        "name": "update_deal_stage",
+        "description": "Move a deal to another pipeline stage.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dealId": {"type": "string", "description": "The deal's id from list_deals."},
+                "stage": {"type": "string", "enum": DEAL_STAGES},
+            },
+            "required": ["dealId", "stage"],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": "List follow-up tasks with their due date and completion state.",
+        "parameters": {
+            "type": "object",
+            "properties": {"state": {"type": "string", "enum": ["open", "done", "all"], "description": "Which tasks to return; defaults to all."}},
+        },
+    },
+    {
+        "name": "create_task",
+        "description": "Create a follow-up task.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What needs to be done."},
+                "due": {"type": "string", "description": "Due date, YYYY-MM-DD."},
+                "contact": {"type": "string", "description": "Full name of the related contact, as stored in the CRM. Empty if none."},
+            },
+            "required": ["title", "due"],
+        },
+    },
+    {
+        "name": "set_task_done",
+        "description": "Mark a task as completed, or reopen it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "taskId": {"type": "string", "description": "The task's id from list_tasks."},
+                "done": {"type": "boolean", "description": "true to complete the task, false to reopen it."},
+            },
+            "required": ["taskId", "done"],
+        },
+    },
+]
+CHAT_SYSTEM_PROMPT = """You are withaqChat, the assistant inside Withaq CRM. You help {user_name} manage their contacts, deals, and tasks by carrying out the work with your tools, through conversation.
+
+How to work:
+- When the user asks for something, work out which details the task needs. If a required detail is missing, ask for it in a short, friendly message; ask for everything that is missing at once rather than one field per message. Mention useful optional details once, and don't insist on them.
+- Once you have what you need, do the task with your tools, then confirm in one or two sentences what you did.
+- Look things up instead of asking for them: use the list tools to find ids, to check whether a contact already exists before creating one, and to answer questions about the data. Never show ids to the user.
+- If a name matches more than one record, ask which one they mean.
+- Before deleting a contact, ask the user to confirm, naming the contact, and delete only after they say yes.
+- Deal values are stored in US dollars. The interface shows amounts in {currency_label}. If the user gives an amount without a currency, treat it as {default_currency}. Convert SAR to USD by dividing by 3.75, and report amounts back to the user in {default_currency}.
+- Resolve relative dates ("tomorrow", "next Monday") against today's date and store dates as YYYY-MM-DD.
+- Status, stage, and field values must use the English values the tools accept (Lead, Customer, Partner; Lead, Qualified, Proposal, Won), but talk to the user in their own words.
+- If a request is outside what the CRM tools can do, say so briefly.
+- Reply in the language the user writes in (Arabic or English). Keep replies short and conversational; use plain text without Markdown headings or tables.
+
+Today's date is {today}."""
+chat_conversations: dict[str, dict[str, Any]] = {}
+chat_lock = threading.Lock()
+chat_client: genai.Client | None = None
+CHAT_CONFIG_ERROR = "withaqChat is not configured. Set GEMINI_API_KEY on the server."
+
+
+# Request data for one user turn in a withaqChat conversation.
+class ChatInput(BaseModel):
+    """Validate a chat message and the conversation it continues."""
+
+    message: str = Field(min_length=1, max_length=4000)
+    conversationId: str | None = Field(default=None, max_length=64)
+    language: Literal["en", "ar"] = "en"
+
+
+# Create the Gemini client on first use so the API starts without chat credentials.
+def get_chat_client() -> genai.Client:
+    """Return the shared Gemini client, reading GEMINI_API_KEY from the environment."""
+    global chat_client
+    if chat_client is None:
+        try:
+            chat_client = genai.Client()
+        except ValueError as error:
+            raise HTTPException(status_code=503, detail=CHAT_CONFIG_ERROR) from error
+    return chat_client
+
+
+# Generation settings shared by every withaqChat request in a conversation.
+def chat_config(system: str) -> genai_types.GenerateContentConfig:
+    """Return the Gemini config with the CRM tools and the conversation's system prompt."""
+    return genai_types.GenerateContentConfig(
+        system_instruction=system,
+        tools=[genai_types.Tool(function_declarations=[
+            genai_types.FunctionDeclaration(
+                name=tool["name"], description=tool["description"],
+                parameters_json_schema=tool["parameters"],
+            )
+            for tool in CHAT_TOOLS
+        ])],
+        # Tool calls are executed by the loop in chat(), not by the SDK.
+        automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+
+# Return the caller's conversation, or start a new one with a frozen system prompt.
+def get_conversation(
+    conversation_id: str | None, user: dict[str, object], language: str
+) -> tuple[str, dict[str, Any]]:
+    """Look up an existing conversation for this user or create a new one."""
+    now = datetime.now(timezone.utc)
+    with chat_lock:
+        for key in [key for key, value in chat_conversations.items()
+                    if now - value["updatedAt"] > CHAT_CONVERSATION_LIFETIME]:
+            del chat_conversations[key]
+        conversation = chat_conversations.get(conversation_id or "")
+        if conversation is not None and conversation["userId"] == user["id"]:
+            return conversation_id, conversation
+        if len(chat_conversations) >= CHAT_MAX_CONVERSATIONS:
+            oldest = min(chat_conversations, key=lambda key: chat_conversations[key]["updatedAt"])
+            del chat_conversations[oldest]
+        arabic = language == "ar"
+        conversation = {
+            "userId": user["id"],
+            "updatedAt": now,
+            "messages": [],
+            # The system prompt stays fixed for the life of the conversation so its history stays valid.
+            "system": CHAT_SYSTEM_PROMPT.format(
+                user_name=user["fullName"],
+                currency_label="Saudi riyals (SAR)" if arabic else "US dollars (USD)",
+                default_currency="SAR" if arabic else "USD",
+                today=date.today().isoformat(),
+            ),
+        }
+        new_id = uuid4().hex
+        chat_conversations[new_id] = conversation
+        return new_id, conversation
+
+
+# Find one record by id, raising a readable error for the model when it is unknown.
+def find_record(rows: list[dict[str, object]], record_id: str, label: str) -> dict[str, object]:
+    """Return the row with the given id."""
+    for row in rows:
+        if row["id"] == record_id:
+            return row
+    raise LookupError(f"No {label} with id {record_id}. Look it up again with the list tool.")
+
+
+# Run one CRM tool call through the same functions the REST routes use.
+def run_chat_tool(name: str, args: dict[str, Any], user: dict[str, object]) -> object:
+    """Execute a withaqChat tool and return its JSON-serializable result."""
+    if name == "list_contacts":
+        query = str(args.get("query") or "").strip().lower()
+        return [
+            contact for contact in list_contacts(user)
+            if (not args.get("status") or contact["status"] == args["status"])
+            and (not query or query in " ".join(str(value) for value in contact.values()).lower())
+        ]
+    if name == "create_contact":
+        values = {"lastContact": date.today().isoformat(), **args}
+        return create_contact(ContactInput(**values, tone=random.choice(CONTACT_TONES)), user)
+    if name == "update_contact":
+        contact_id = args.pop("contactId")
+        existing = find_record(list_contacts(user), contact_id, "contact")
+        merged = {key: value for key, value in existing.items() if key != "id"} | args
+        return update_contact(contact_id, ContactInput(**merged), user)
+    if name == "delete_contact":
+        delete_contact(args["contactId"], user)
+        return {"deleted": args["contactId"]}
+    if name == "list_deals":
+        return [deal for deal in list_deals(user) if not args.get("stage") or deal["stage"] == args["stage"]]
+    if name == "create_deal":
+        return create_deal(DealInput(
+            name=args["name"], contact=args.get("contact", ""),
+            value=round(float(args["valueUsd"]), 2), stage=args.get("stage", "Lead"),
+        ), user)
+    if name == "update_deal_stage":
+        return update_deal_stage(args["dealId"], DealStageInput(stage=args["stage"]), user)
+    if name == "list_tasks":
+        state = args.get("state", "all")
+        return [task for task in list_tasks(user)
+                if state == "all" or task["done"] == (state == "done")]
+    if name == "create_task":
+        date.fromisoformat(args["due"])
+        return create_task(TaskInput(
+            title=args["title"], due=args["due"], contact=args.get("contact", ""), done=False,
+        ), user)
+    if name == "set_task_done":
+        return update_task_status(args["taskId"], TaskStatusInput(done=bool(args["done"])), user)
+    raise LookupError(f"Unknown tool {name}")
+
+
+# Run one function call and wrap its output or error as a function response for Gemini.
+def chat_tool_result(call: genai_types.FunctionCall, user: dict[str, object]) -> tuple[genai_types.Part, bool]:
+    """Execute a function call and return the response part and whether it failed."""
+    try:
+        result, failed = {"result": run_chat_tool(call.name, dict(call.args or {}), user)}, False
+    except HTTPException as error:
+        result, failed = {"error": str(error.detail)}, True
+    except ValidationError as error:
+        result, failed = {"error": "Invalid input: " + "; ".join(
+            f"{'.'.join(str(part) for part in issue['loc'])}: {issue['msg']}" for issue in error.errors()
+        )}, True
+    except (LookupError, KeyError, TypeError, ValueError) as error:
+        result, failed = {"error": f"Could not run {call.name}: {error}"}, True
+    # Round-trip through JSON so dates and other values arrive as plain strings.
+    response = json.loads(json.dumps(result, default=str))
+    part = genai_types.Part(function_response=genai_types.FunctionResponse(id=call.id, name=call.name, response=response))
+    return part, failed
+
+
+@app.post("/api/chat")
+# Continue a withaqChat conversation, running CRM tools until Gemini has a reply.
+def chat(payload: ChatInput, user: dict[str, object] = Depends(require_user)) -> dict[str, object]:
+    """Send the user's message to Gemini, execute requested CRM tools, and return the reply."""
+    conversation_id, conversation = get_conversation(payload.conversationId, user, payload.language)
+    messages = conversation["messages"]
+    turn_start = len(messages)
+    messages.append(genai_types.Content(role="user", parts=[genai_types.Part(text=payload.message.strip())]))
+    changed = False
+    try:
+        client = get_chat_client()
+        config = chat_config(conversation["system"])
+        for _ in range(CHAT_MAX_TOOL_ROUNDS):
+            response = client.models.generate_content(model=CHAT_MODEL, contents=messages, config=config)
+            candidate = response.candidates[0] if response.candidates else None
+            if candidate is None or candidate.content is None or not candidate.content.parts:
+                # Blocked by safety filters or an empty answer: drop the turn so the history stays valid.
+                del messages[turn_start:]
+                reply = ("لا أستطيع المساعدة في هذا الطلب. جرّب صياغة أخرى." if payload.language == "ar"
+                         else "I can't help with that request. Try rephrasing it.")
+                return {"conversationId": conversation_id, "reply": reply, "changed": changed}
+            # Keep the model's content unchanged (thought signatures included) for the next request.
+            messages.append(candidate.content)
+            calls = response.function_calls or []
+            if not calls:
+                conversation["updatedAt"] = datetime.now(timezone.utc)
+                return {"conversationId": conversation_id, "reply": (response.text or "").strip(), "changed": changed}
+            results = [chat_tool_result(call, user) for call in calls]
+            changed = changed or any(
+                call.name in CHAT_WRITE_TOOLS and not failed for call, (_, failed) in zip(calls, results)
+            )
+            messages.append(genai_types.Content(role="user", parts=[part for part, _ in results]))
+        raise HTTPException(status_code=502, detail="The assistant did not finish the task. Try again.")
+    except HTTPException:
+        del messages[turn_start:]
+        raise
+    except genai_errors.ClientError as error:
+        del messages[turn_start:]
+        if error.code == 429 and "free_tier" in str(error):
+            raise HTTPException(status_code=429, detail="withaqChat reached the Gemini free-tier limit. Wait a minute and try again.") from error
+        if error.code == 429:
+            raise HTTPException(status_code=429, detail="The assistant is busy. Try again in a moment.") from error
+        if error.code in (401, 403) or "API key" in str(error):
+            raise HTTPException(status_code=503, detail=CHAT_CONFIG_ERROR) from error
+        raise HTTPException(status_code=502, detail="The assistant service rejected the request.") from error
+    except genai_errors.ServerError as error:
+        del messages[turn_start:]
+        if error.code == 503:
+            raise HTTPException(status_code=503, detail="The assistant is busy. Try again in a moment.") from error
+        raise HTTPException(status_code=502, detail="The assistant service returned an error.") from error
+    except genai_errors.APIError as error:
+        del messages[turn_start:]
+        raise HTTPException(status_code=502, detail="The assistant service returned an error.") from error
+    except httpx.HTTPError as error:
+        del messages[turn_start:]
+        raise HTTPException(status_code=502, detail="Could not reach the assistant service.") from error
