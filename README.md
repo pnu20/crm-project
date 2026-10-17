@@ -56,9 +56,9 @@ It listens on `http://127.0.0.1:3000`.
 
 ## withaqChat
 
-The **withaqChat** item in the sidebar opens a chat assistant that carries out CRM tasks through conversation: adding, editing, and deleting contacts, creating deals and moving them between stages, and creating and completing tasks. It asks for any details it needs before acting, and asks for confirmation before deleting a contact.
+The **withaqChat** item in the sidebar opens a guided chat that carries out CRM tasks step by step: adding contacts, deals, and tasks, completing a task, moving a deal to another stage, deleting a contact, and showing a summary. It asks one question at a time, offers the valid answers as buttons, and asks for confirmation before saving or deleting.
 
-The backend's `/api/chat` route sends the conversation to Google Gemini (`gemini-flash-latest` by default; set `GEMINI_MODEL` to change it) and runs the requested actions with the same functions as the REST routes. Set `GEMINI_API_KEY` in `.env` to enable it; keys are created in Google AI Studio. Conversations are kept in the API process's memory for 12 hours, so restarting the API starts them over.
+It runs entirely in the browser without AI or any external service: it recognizes Arabic and English keywords to pick the task, and saves through the same API routes as the site's forms.
 
 ## Sign in
 
