@@ -139,6 +139,8 @@
     function chatPick(options,text){const value=plain(text),index=Number(value);if(Number.isInteger(index)&&index>=1&&index<=options.length)return options[index-1];const exact=options.find(option=>plain(option.label)===value||plain(option.value)===value);if(exact)return exact;const partial=options.filter(option=>plain(option.label).includes(value));return partial.length===1?partial[0]:null}
     /** Return the full name of the only contact matching the text, or the text itself. */
     function chatContactName(text){const found=contacts.filter(contact=>plain(name(contact)).includes(plain(text)));return found.length===1?name(found[0]):text}
+    /** The most recently contacted people, offered as quick replies when a task or deal needs a contact. */
+    const chatContactChips=()=>[...contacts].sort((a,b)=>b.lastContact.localeCompare(a.lastContact)).slice(0,8).map(name);
     const chatStatusOptions=()=>["Lead","Customer","Partner"].map(value=>({value,label:translate(value)})),chatStageOptions=()=>["Lead","Qualified","Proposal","Won"].map(value=>({value,label:translate(value)}));
     const CHAT_FLOWS={
       addContact:{steps:[
@@ -152,7 +154,7 @@
         run:async data=>{await api("/contacts",{method:"POST",body:JSON.stringify({firstName:data.firstName,lastName:data.lastName,email:data.email||"",phone:data.phone||"",company:data.company||"",role:"",status:data.status,lastContact:ago(0),owner:"JD",tone:["tone-green","tone-coral","tone-blue","tone-lilac"][Math.floor(Math.random()*4)]})});return say(`Added ${data.firstName} ${data.lastName} to your contacts.`,`تمت إضافة ${data.firstName} ${data.lastName} إلى جهات الاتصال.`)}},
       addDeal:{steps:[
         {key:"name",ask:()=>say("What's the deal called?","ما اسم الصفقة؟")},
-        {key:"contact",optional:true,ask:()=>say("Who is the contact for this deal?","من جهة الاتصال المرتبطة بالصفقة؟"),after:(data,value)=>{data.contact=chatContactName(value)}},
+        {key:"contact",optional:true,chips:chatContactChips,ask:()=>say("Who is the contact for this deal?","من جهة الاتصال المرتبطة بالصفقة؟"),after:(data,value)=>{data.contact=chatContactName(value)}},
         {key:"value",type:"number",ask:()=>say("What's the deal value in US dollars?","ما قيمة الصفقة بالريال؟")},
         {key:"stage",type:"choice",options:chatStageOptions,ask:()=>say("Which stage is it at?","في أي مرحلة هي؟")}],
         summary:data=>say(`Create the deal "${data.name}"${data.contact?` with ${data.contact}`:""}, worth ${money(data.usd)}, at stage ${translate(data.stage)}?`,`هل أنشئ صفقة «${data.name}»${data.contact?` مع ${data.contact}`:""} بقيمة ${money(data.usd)} في مرحلة «${translate(data.stage)}»؟`),
@@ -160,7 +162,7 @@
       addTask:{steps:[
         {key:"title",ask:()=>say("What needs to be done?","ما المهمة المطلوبة؟")},
         {key:"due",type:"date",chips:()=>[say("Today","اليوم"),say("Tomorrow","بكرة")],ask:()=>say("When is it due? (today, tomorrow, in 3 days, or a date like 2026-10-20)","متى موعدها؟ (اليوم، بكرة، بعد 3 أيام، أو تاريخ مثل 2026-10-20)")},
-        {key:"contact",optional:true,ask:()=>say("Which contact is it related to?","بأي جهة اتصال ترتبط؟"),after:(data,value)=>{data.contact=chatContactName(value)}}],
+        {key:"contact",optional:true,chips:chatContactChips,ask:()=>say("Which contact is it related to?","بأي جهة اتصال ترتبط؟"),after:(data,value)=>{data.contact=chatContactName(value)}}],
         summary:data=>say(`Add the task "${data.title}" due ${date(data.due)}${data.contact?` for ${data.contact}`:""}?`,`هل أضيف مهمة «${data.title}» بتاريخ ${date(data.due)}${data.contact?` لـ ${data.contact}`:""}؟`),
         run:async data=>{await api("/tasks",{method:"POST",body:JSON.stringify({title:data.title,due:data.due,contact:data.contact||"",done:false})});return say(`Added the task "${data.title}".`,`تمت إضافة مهمة «${data.title}».`)}},
       completeTask:{steps:[
@@ -198,6 +200,19 @@
     $("#chat-input").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();$("#chat-form").requestSubmit()}});
     $("#chat-new").addEventListener("click",()=>{if(!chatBusy){resetChat();$("#chat-input").focus()}});
     document.querySelector('.nav-item[data-view="chat"]').addEventListener("click",()=>queueMicrotask(()=>$("#chat-input").focus()));
+    Object.assign(arabic,{"Choose or type a contact":"اختر جهة اتصال أو اكتب اسمها","No contacts yet":"لا توجد جهات اتصال بعد","No matching contact. The name you typed will be saved.":"لا توجد جهة اتصال مطابقة، وسيُحفظ الاسم كما كتبته."});
+    /** Turn a text input into a contact picker: it lists contacts matching what is typed, and still accepts any name. */
+    function setupContactPicker(input){const list=input.nextElementSibling;let active=-1;
+      const matches=()=>{const query=plain(input.value);return[...contacts].filter(contact=>!query||plain(`${name(contact)} ${contact.company} ${contact.email}`).includes(query)).sort((a,b)=>name(a).localeCompare(name(b),language)).slice(0,8)};
+      const close=()=>{list.hidden=true;input.setAttribute("aria-expanded","false");active=-1};
+      const open=()=>{const found=matches();active=-1;list.replaceChildren(...found.map(contact=>{const item=document.createElement("li");item.setAttribute("role","option");item.dataset.value=name(contact);item.innerHTML=`<strong>${escape(name(contact))}</strong>${contact.company?`<span>${escape(contact.company)}</span>`:""}`;return item}));if(!found.length){const empty=document.createElement("li");empty.className="combo-empty";empty.textContent=translate(input.value.trim()?"No matching contact. The name you typed will be saved.":"No contacts yet");list.append(empty)}list.hidden=false;input.setAttribute("aria-expanded","true")};
+      const choose=item=>{input.value=item.dataset.value;close()};
+      const highlight=step=>{const items=[...list.querySelectorAll("[data-value]")];if(!items.length)return;active=(active+step+items.length)%items.length;items.forEach((item,index)=>item.classList.toggle("active",index===active));items[active].scrollIntoView({block:"nearest"})};
+      input.addEventListener("focus",open);input.addEventListener("input",open);input.addEventListener("blur",close);
+      input.addEventListener("keydown",event=>{if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(list.hidden)open();highlight(event.key==="ArrowDown"?1:-1)}else if(event.key==="Enter"&&!list.hidden&&active>=0){event.preventDefault();choose(list.querySelectorAll("[data-value]")[active])}else if(event.key==="Escape"&&!list.hidden){event.preventDefault();close()}});
+      // mousedown keeps focus in the input so the choice lands before blur closes the list.
+      list.addEventListener("mousedown",event=>{event.preventDefault();const item=event.target.closest("[data-value]");if(item)choose(item)})}
+    document.querySelectorAll("[data-contact-picker]").forEach(setupContactPicker);
     const today=new Date();$("#today-label").textContent=today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}).toUpperCase();showAuth("login");initializeAuth();
   
 
