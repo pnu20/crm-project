@@ -61,14 +61,15 @@ class DealInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     contact: str = ""
     value: float = Field(ge=0)
-    stage: Literal["Lead", "Qualified", "Proposal", "Won", "Cancelled"] = "Lead"
+    stage: Literal["Lead", "Qualified", "Won", "Cancelled"] = "Lead"
+    currency: Literal["SAR", "USD", "EUR"] = "SAR"
 
 
 # Request schema for moving a deal between pipeline stages.
 class DealStageInput(BaseModel):
     """Validate a deal's next pipeline stage."""
 
-    stage: Literal["Lead", "Qualified", "Proposal", "Won", "Cancelled"]
+    stage: Literal["Lead", "Qualified", "Won", "Cancelled"]
 
 
 # Request schema for creating a follow-up task.
@@ -259,6 +260,7 @@ def initialize_database() -> None:
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 expires_at TIMESTAMPTZ NOT NULL
             );
+            ALTER TABLE deals ADD COLUMN IF NOT EXISTS currency TEXT;
             """
         )
         if connection.execute("SELECT COUNT(*) AS n FROM contacts").fetchone()["n"] == 0:
@@ -286,7 +288,7 @@ def initialize_database() -> None:
             connection.cursor().executemany(
                 "INSERT INTO deals (id, name, contact, value, stage) VALUES (%s, %s, %s, %s, %s)",
                 [
-                    ("d1", "Brand refresh", "Olivia Chen", 24000, "Proposal"),
+                    ("d1", "Brand refresh", "Olivia Chen", 24000, "Qualified"),
                     ("d2", "Growth strategy", "Marcus Reed", 18000, "Qualified"),
                     ("d3", "Website redesign", "Theo Williams", 32000, "Lead"),
                     ("d4", "Q4 campaign", "Sofia Martinez", 12500, "Won"),
@@ -306,6 +308,17 @@ def initialize_database() -> None:
                     ("t5", "Send introduction to the team", "Amara Okafor", date_offset(1), False),
                 ],
             )
+
+        # Deals saved before per-deal currencies hold US dollars; convert them once to riyals at the 3.75 peg.
+        connection.execute(
+            """
+            UPDATE deals SET currency = 'SAR', value = ROUND((value * 3.75)::numeric, 2)
+            WHERE currency IS NULL;
+            ALTER TABLE deals ALTER COLUMN currency SET DEFAULT 'SAR', ALTER COLUMN currency SET NOT NULL;
+            """
+        )
+        # The Proposal stage was removed; deals still in it go back to Qualified.
+        connection.execute("UPDATE deals SET stage = 'Qualified' WHERE stage = 'Proposal'")
 
 
 @asynccontextmanager
@@ -555,7 +568,7 @@ def list_deals(_: dict[str, object] = Depends(require_user)) -> list[dict[str, o
     """Return all opportunities ordered by their insertion time."""
     with connect() as connection:
         rows = connection.execute(
-            "SELECT id, name, contact, value, stage FROM deals ORDER BY seq DESC"
+            "SELECT id, name, contact, value, stage, currency FROM deals ORDER BY seq DESC"
         ).fetchall()
     return rows
 
@@ -570,8 +583,8 @@ def create_deal(
     values = payload.model_dump()
     with connect() as connection:
         connection.execute(
-            "INSERT INTO deals (id, name, contact, value, stage) VALUES (%s, %s, %s, %s, %s)",
-            (deal_id, values["name"], values["contact"], values["value"], values["stage"]),
+            "INSERT INTO deals (id, name, contact, value, stage, currency) VALUES (%s, %s, %s, %s, %s, %s)",
+            (deal_id, values["name"], values["contact"], values["value"], values["stage"], values["currency"]),
         )
     return {"id": deal_id, **values}
 
@@ -589,7 +602,7 @@ def update_deal_stage(
             "UPDATE deals SET stage = %s WHERE id = %s", (payload.stage, deal_id)
         )
         row = connection.execute(
-            "SELECT id, name, contact, value, stage FROM deals WHERE id = %s", (deal_id,)
+            "SELECT id, name, contact, value, stage, currency FROM deals WHERE id = %s", (deal_id,)
         ).fetchone()
     if result.rowcount == 0 or row is None:
         raise HTTPException(status_code=404, detail="Deal not found")

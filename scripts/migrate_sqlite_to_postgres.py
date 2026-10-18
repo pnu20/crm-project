@@ -48,7 +48,7 @@ def main() -> None:
         )
         # Insert in SQLite rowid order so the new seq column keeps the same ordering.
         cursor.executemany(
-            "INSERT INTO deals (id, name, contact, value, stage) VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO deals (id, name, contact, value, stage, currency) VALUES (%s, %s, %s, %s, %s, 'USD')",
             [tuple(row) for row in source.execute(
                 "SELECT id, name, contact, value, stage FROM deals ORDER BY rowid"
             )],
