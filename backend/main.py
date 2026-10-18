@@ -61,14 +61,14 @@ class DealInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     contact: str = ""
     value: float = Field(ge=0)
-    stage: Literal["Lead", "Qualified", "Proposal", "Won"] = "Lead"
+    stage: Literal["Lead", "Qualified", "Proposal", "Won", "Cancelled"] = "Lead"
 
 
 # Request schema for moving a deal between pipeline stages.
 class DealStageInput(BaseModel):
     """Validate a deal's next pipeline stage."""
 
-    stage: Literal["Lead", "Qualified", "Proposal", "Won"]
+    stage: Literal["Lead", "Qualified", "Proposal", "Won", "Cancelled"]
 
 
 # Request schema for creating a follow-up task.
