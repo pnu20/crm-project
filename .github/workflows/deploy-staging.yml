@@ -17,6 +17,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.withaq.me
     steps:
       - name: Set up SSH key
         env:
