@@ -1,8 +1,6 @@
 # Deploys the main branch to https://withaq.me. Runs only when started by hand
 # from the Actions tab ("Run workflow"), so nothing reaches production by accident.
-# Uses the same STAGING_HOST, STAGING_USER and STAGING_SSH_KEY secrets (same server), plus:
-#   PRODUCTION_DIR   repository variable (Settings > Secrets and variables > Actions > Variables)
-#                    with the full path of the production project folder on the server
+# Uses the same STAGING_HOST, STAGING_USER and STAGING_SSH_KEY secrets (same server).
 name: Deploy production
 
 on:
@@ -33,15 +31,10 @@ jobs:
         env:
           HOST: ${{ secrets.STAGING_HOST }}
           USER: ${{ secrets.STAGING_USER }}
-          PRODUCTION_DIR: ${{ vars.PRODUCTION_DIR }}
         run: |
-          if [ -z "$PRODUCTION_DIR" ]; then
-            echo "Set the PRODUCTION_DIR repository variable first." >&2
-            exit 1
-          fi
           ssh -i ~/.ssh/deploy_key "$USER@$HOST" "
             set -e
-            cd '$PRODUCTION_DIR'
+            cd /home/ubuntu/crm-project
             git fetch origin
             git checkout main
             git pull --ff-only origin main
