@@ -1,0 +1,43 @@
+# Deploys the main branch to https://withaq.me. Runs only when started by hand
+# from the Actions tab ("Run workflow"), so nothing reaches production by accident.
+# Uses the same STAGING_HOST, STAGING_USER and STAGING_SSH_KEY secrets (same server).
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://withaq.me
+    steps:
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Pull main and run the deploy script on the server
+        env:
+          HOST: ${{ secrets.STAGING_HOST }}
+          USER: ${{ secrets.STAGING_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" "
+            set -e
+            cd /home/ubuntu/crm-project
+            git fetch origin
+            git checkout main
+            git pull --ff-only origin main
+            sudo bash scripts/deploy_lightsail.sh
+            git log --oneline -1
+          "

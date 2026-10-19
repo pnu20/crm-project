@@ -1,0 +1,46 @@
+# Updates https://staging.withaq.me on every push to the staging branch.
+# Needs these repository secrets (Settings > Secrets and variables > Actions):
+#   STAGING_HOST     server address, e.g. the Lightsail static IP
+#   STAGING_USER     SSH user, e.g. ubuntu
+#   STAGING_SSH_KEY  contents of the private key (.pem) used to SSH into the server
+name: Deploy staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.withaq.me
+    steps:
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Pull the staging branch on the server
+        env:
+          HOST: ${{ secrets.STAGING_HOST }}
+          USER: ${{ secrets.STAGING_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" '
+            set -e
+            cd ~/crm-staging
+            git fetch origin
+            git checkout staging
+            git pull --ff-only origin staging
+            git log --oneline -1
+          '
