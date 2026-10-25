@@ -18,7 +18,11 @@ from dotenv import load_dotenv
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
-from backend.chat import load_chat_model, router as chat_router, unload_chat_model
+try:
+    from backend.chat import load_chat_model, router as chat_router, unload_chat_model
+except ModuleNotFoundError:
+    # Some servers start the API from inside backend/ as "main:app", where "backend" is not a package.
+    from chat import load_chat_model, router as chat_router, unload_chat_model
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
