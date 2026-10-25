@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
+from backend.chat import load_chat_model, router as chat_router, unload_chat_model
+
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 DATABASE_SETTINGS = {
@@ -324,9 +326,11 @@ def initialize_database() -> None:
 @asynccontextmanager
 # Prepare persistent storage during FastAPI startup.
 async def lifespan(_: FastAPI):
-    """Initialize persistent storage before the API begins serving requests."""
+    """Initialize storage and the chat model before the API begins serving requests."""
     initialize_database()
+    load_chat_model()
     yield
+    unload_chat_model()
 
 
 app = FastAPI(title="Withaq CRM API", version="1.0.0", lifespan=lifespan)
@@ -345,6 +349,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+# The chat model is costly to run, so only signed-in users may call it.
+app.include_router(chat_router, dependencies=[Depends(require_user)])
 
 
 @app.get("/api/health")
