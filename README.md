@@ -58,6 +58,8 @@ The model downloads on the first start and loads at startup. Send `{"message": "
 
 On a server too small for the local model (such as the 1 GB Lightsail instance), use a hosted Qwen model instead: set `CHAT_API_KEY`, `CHAT_API_BASE_URL` and `CHAT_API_MODEL` in `.env` (see `.env.example`) and restart the API. No extra packages are needed. When none of these work, the chat button is hidden.
 
+The assistant answers questions about the CRM from `backend/knowledge/withaq_faq.md`, which is sent with every question. To change what it knows, edit that file (describe only what the site really does, including features it does not have), then restart the API.
+
 To run the Node API separately:
 
 ```powershell
