@@ -1,0 +1,5 @@
+# Optional: enables the /api/chat endpoint (local Qwen2.5 model).
+# Install on top of requirements.txt. Without these packages the CRM runs normally and /api/chat returns 503.
+-r requirements.txt
+torch==2.14.1
+transformers==5.20.2

@@ -24,7 +24,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Check Python syntax
-        run: python -m py_compile backend/main.py scripts/*.py
+        run: python -m py_compile backend/*.py scripts/*.py
 
       - name: Check JavaScript syntax
         run: |
