@@ -56,6 +56,8 @@ Open `http://127.0.0.1:8000`. API documentation is available at `http://127.0.0.
 
 The model downloads on the first start and loads at startup. Send `{"message": "..."}` with the usual `Authorization: Bearer <token>` header; the response is `{"reply": "..."}`. Without these packages the API runs normally and `/api/chat` returns 503.
 
+On a server too small for the local model (such as the 1 GB Lightsail instance), use a hosted Qwen model instead: set `CHAT_API_KEY`, `CHAT_API_BASE_URL` and `CHAT_API_MODEL` in `.env` (see `.env.example`) and restart the API. No extra packages are needed. When none of these work, the chat button is hidden.
+
 To run the Node API separately:
 
 ```powershell
