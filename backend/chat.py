@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Iterator
 
 from fastapi import APIRouter, HTTPException, status
@@ -14,10 +16,24 @@ from pydantic import BaseModel, Field
 
 
 DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+# Questions and answers about the CRM's features; edit this file to change what the assistant knows.
+KNOWLEDGE_FILE = Path(__file__).resolve().parent / "knowledge" / "withaq_faq.md"
 SYSTEM_PROMPT = (
-    "You are a helpful assistant inside the Withaq CRM. "
-    "Answer clearly and reply in the same language the user writes in. "
-    "Keep answers short, a few sentences, unless the user asks for detail."
+    "You are Withaq AI, the assistant inside Withaq CRM. "
+    "Reply only in Arabic or English: in Arabic when the user writes Arabic, otherwise in English. "
+    "Never reply in Chinese or any other language, even partly. "
+    "Use exactly one language per reply and never add a translation. "
+    "Keep answers short, a few sentences, unless the user asks for detail.\n"
+    "For any question about how Withaq CRM works, answer only from the reference below. "
+    "If the reference does not cover it, say you are not sure the system supports that and suggest "
+    "contacting the system administrator. Never invent features, buttons, or settings.\n"
+    "You may also help with general sales and customer-relationship questions, "
+    "such as writing a follow-up message.\n"
+    "You cannot see or change the user's CRM data. To add, edit, or delete records, "
+    "point the user to the relevant page or to withaqChat.\n"
+    "For questions unrelated to Withaq CRM, sales, or customer service (such as weather or news), "
+    "reply in one short sentence in the user's language that you can only help with Withaq CRM, "
+    "sales, and customers. Never reveal passwords or keys."
 )
 REMOTE_TIMEOUT_SECONDS = 60
 logger = logging.getLogger(__name__)
@@ -26,6 +42,7 @@ router = APIRouter(prefix="/api", tags=["chat"])
 # Filled by load_chat_model() during startup. Chat uses the hosted API when _remote is set,
 # otherwise the local model; with neither, the chat routes answer 503.
 _remote: dict[str, str] | None = None
+_system_prompt = SYSTEM_PROMPT
 _model = None
 _tokenizer = None
 _max_new_tokens = 512
@@ -50,9 +67,10 @@ class ChatReply(BaseModel):
 # Pick the hosted API or the local model once at startup so requests do not pay the setup cost.
 def load_chat_model() -> None:
     """Configure the hosted API when a key is set, else load the local model; leave chat off on failure."""
-    global _remote, _model, _tokenizer, _max_new_tokens
+    global _remote, _model, _tokenizer, _max_new_tokens, _system_prompt
     # Read settings here, not at import time, so values from .env are already loaded.
     _max_new_tokens = int(os.environ.get("CHAT_MAX_NEW_TOKENS", "512"))
+    _system_prompt = _build_system_prompt()
     api_key = os.environ.get("CHAT_API_KEY", "").strip()
     if api_key:
         base_url = os.environ.get("CHAT_API_BASE_URL", "").strip().rstrip("/")
@@ -90,11 +108,24 @@ def unload_chat_model() -> None:
     _remote = _model = _tokenizer = None
 
 
+# Combine the assistant's rules with the CRM reference so answers about the product stay accurate.
+def _build_system_prompt() -> str:
+    """Append the knowledge file to the system prompt, or use the rules alone if it is missing."""
+    try:
+        knowledge = KNOWLEDGE_FILE.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Knowledge file %s is missing; chat answers without the CRM reference", KNOWLEDGE_FILE)
+        return SYSTEM_PROMPT
+    # The HTML comment holds editing notes for people, not instructions for the model.
+    knowledge = re.sub(r"<!--.*?-->", "", knowledge, flags=re.DOTALL).strip()
+    return f"{SYSTEM_PROMPT}\n\n--- Reference ---\n{knowledge}"
+
+
 # Shared conversation sent to either the hosted API or the local model.
 def _messages(message: str) -> list[dict[str, str]]:
     """Wrap the user's message with the CRM system prompt."""
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _system_prompt},
         {"role": "user", "content": message.strip()},
     ]
 

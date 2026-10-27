@@ -97,9 +97,9 @@ class TaskStatusInput(BaseModel):
 
 # Request data for setting up the first CRM administrator.
 class AccountSetupInput(BaseModel):
-    """Validate credentials and profile details for the first account."""
+    """Validate credentials for the first account; the name defaults to the email's local part."""
 
-    fullName: str = Field(min_length=2, max_length=120)
+    fullName: str = Field(default="", max_length=120)
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=12, max_length=128)
 
@@ -380,6 +380,8 @@ def setup_account(payload: AccountSetupInput) -> dict[str, object]:
     email = payload.email.strip().lower()
     if "@" not in email or email.startswith("@") or email.endswith("@"):
         raise HTTPException(status_code=422, detail="Enter a valid email address")
+    # The setup screen asks only for email and password; the name can be changed later in Settings.
+    full_name = payload.fullName.strip() or email.split("@")[0]
 
     try:
         with connect() as connection:
@@ -391,7 +393,7 @@ def setup_account(payload: AccountSetupInput) -> dict[str, object]:
                 """INSERT INTO users (full_name, email, password_hash, created_at)
                    VALUES (%s, %s, %s, %s) RETURNING id""",
                 (
-                    payload.fullName.strip(),
+                    full_name,
                     email,
                     hash_password(payload.password),
                     datetime.now(timezone.utc),
@@ -400,7 +402,7 @@ def setup_account(payload: AccountSetupInput) -> dict[str, object]:
     except psycopg.errors.UniqueViolation as error:
         raise HTTPException(status_code=409, detail="An account already exists") from error
 
-    return issue_session(user_id, payload.fullName.strip(), email)
+    return issue_session(user_id, full_name, email)
 
 
 @app.post("/api/auth/login")
