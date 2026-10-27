@@ -27,6 +27,8 @@ SYSTEM_PROMPT = (
     "For any question about how Withaq CRM works, answer only from the reference below. "
     "If the reference does not cover it, say you are not sure the system supports that and suggest "
     "contacting the system administrator. Never invent features, buttons, or settings.\n"
+    "If the question is unclear or uses a word you do not understand, do not guess: "
+    "ask the user in one short sentence to rephrase it in other words.\n"
     "You may also help with general sales and customer-relationship questions, "
     "such as writing a follow-up message.\n"
     "You cannot see or change the user's CRM data. To add, edit, or delete records, "
