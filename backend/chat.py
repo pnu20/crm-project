@@ -23,6 +23,7 @@ SYSTEM_PROMPT = (
     "Reply only in Arabic or English: in Arabic when the user writes Arabic, otherwise in English. "
     "Never reply in Chinese or any other language, even partly. "
     "Use exactly one language per reply and never add a translation. "
+    "This applies to every reply, including refusals and short fixed answers.\n"
     "Keep answers short, a few sentences, unless the user asks for detail.\n"
     "For any question about how Withaq CRM works, answer only from the reference below. "
     "If the reference does not cover it, say you are not sure the system supports that and suggest "
@@ -33,11 +34,23 @@ SYSTEM_PROMPT = (
     "such as writing a follow-up message.\n"
     "You cannot see or change the user's CRM data. To add, edit, or delete records, "
     "point the user to the relevant page or to withaqChat.\n"
-    "For questions unrelated to Withaq CRM, sales, or customer service (such as weather or news), "
-    "reply in one short sentence in the user's language that you can only help with Withaq CRM, "
-    "sales, and customers. Never reveal passwords or keys."
+    "For any question unrelated to Withaq CRM, sales, or customer service, whatever the topic "
+    "(weather, news, sports, general knowledge, and so on), do not answer it: reply only with one short "
+    "sentence in the user's language that you are an assistant for Withaq CRM, sales, and customer "
+    "service only. Never reveal passwords or keys; if asked for one, say in the user's language "
+    "that you cannot see passwords and suggest contacting the system administrator."
 )
 REMOTE_TIMEOUT_SECONDS = 60
+# Low randomness keeps Qwen from drifting into Chinese mid-reply.
+REMOTE_TEMPERATURE = 0.3
+# Repeated after the long reference, where the model pays the most attention.
+LANGUAGE_REMINDER = (
+    "Reminder: write the whole reply in the user's language, Arabic or English only. "
+    "Never use Chinese or any other language."
+)
+# Chinese, Japanese, and Korean characters, including full-width punctuation such as "，" and "。".
+FOREIGN_SCRIPT = re.compile(r"[　-ヿ㐀-䶿一-鿿가-힯＀-￯]")
+ARABIC_SCRIPT = re.compile(r"[؀-ۿ]")
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -117,10 +130,10 @@ def _build_system_prompt() -> str:
         knowledge = KNOWLEDGE_FILE.read_text(encoding="utf-8")
     except OSError:
         logger.warning("Knowledge file %s is missing; chat answers without the CRM reference", KNOWLEDGE_FILE)
-        return SYSTEM_PROMPT
+        return f"{SYSTEM_PROMPT}\n{LANGUAGE_REMINDER}"
     # The HTML comment holds editing notes for people, not instructions for the model.
     knowledge = re.sub(r"<!--.*?-->", "", knowledge, flags=re.DOTALL).strip()
-    return f"{SYSTEM_PROMPT}\n\n--- Reference ---\n{knowledge}"
+    return f"{SYSTEM_PROMPT}\n\n--- Reference ---\n{knowledge}\n--- End of reference ---\n\n{LANGUAGE_REMINDER}"
 
 
 # Shared conversation sent to either the hosted API or the local model.
@@ -147,6 +160,7 @@ def _remote_request(message: str, stream: bool):
             "model": _remote["model"],
             "messages": _messages(message),
             "max_tokens": _max_new_tokens,
+            "temperature": REMOTE_TEMPERATURE,
             "stream": stream,
         }
     ).encode("utf-8")
@@ -180,6 +194,36 @@ def _remote_pieces(response) -> Iterator[str]:
                 yield text
 
 
+# Message shown in place of a reply that slipped into another script.
+def _language_fallback(message: str) -> str:
+    """Ask the user to rephrase, in Arabic when the question is Arabic."""
+    if ARABIC_SCRIPT.search(message):
+        return "عذرًا، لم أستطع إكمال الرد. أعد صياغة سؤالك من فضلك."
+    return "Sorry, I couldn't finish that reply. Please rephrase your question."
+
+
+# Stop a reply at the first Chinese, Japanese, or Korean character, since the prompt alone does not prevent it.
+def _guard_language(pieces: Iterator[str], message: str) -> Iterator[str]:
+    """Yield the pieces up to any foreign-script character, then end with the fallback message."""
+    sent = ""
+    for piece in pieces:
+        match = FOREIGN_SCRIPT.search(piece)
+        if match is None:
+            sent += piece
+            yield piece
+            continue
+        kept = piece[:match.start()]
+        sent += kept
+        if kept:
+            yield kept
+        logger.warning("Chat reply switched to another script; replaced the rest with the fallback message")
+        yield ("\n\n" if sent.strip() else "") + _language_fallback(message)
+        # Close the hosted API connection now instead of reading the rest of the reply.
+        if hasattr(pieces, "close"):
+            pieces.close()
+        return
+
+
 # Turn a user message into model-ready tensors for the local model.
 def _prompt_inputs(message: str):
     """Apply the chat template to the message and tokenize it for generation."""
@@ -204,7 +248,8 @@ def chat_stream(payload: ChatInput) -> StreamingResponse:
     if _remote is not None:
         # Open the request before streaming starts so a failure still returns an error status.
         response = _remote_request(payload.message, stream=True)
-        return StreamingResponse(_remote_pieces(response), media_type="text/plain; charset=utf-8", headers=headers)
+        pieces = _guard_language(_remote_pieces(response), payload.message)
+        return StreamingResponse(pieces, media_type="text/plain; charset=utf-8", headers=headers)
 
     inputs = _prompt_inputs(payload.message)
 
@@ -223,7 +268,7 @@ def chat_stream(payload: ChatInput) -> StreamingResponse:
             streamer.end()
 
     threading.Thread(target=generate, daemon=True).start()
-    return StreamingResponse(streamer, media_type="text/plain; charset=utf-8", headers=headers)
+    return StreamingResponse(_guard_language(streamer, payload.message), media_type="text/plain; charset=utf-8", headers=headers)
 
 
 @router.post("/chat", response_model=ChatReply)
@@ -234,7 +279,8 @@ def chat(payload: ChatInput) -> ChatReply:
     if _remote is not None:
         with _remote_request(payload.message, stream=False) as response:
             result = json.load(response)
-        return ChatReply(reply=result["choices"][0]["message"]["content"].strip())
+        reply = result["choices"][0]["message"]["content"].strip()
+        return ChatReply(reply="".join(_guard_language(iter([reply]), payload.message)).strip())
 
     inputs = _prompt_inputs(payload.message)
 
@@ -246,4 +292,4 @@ def chat(payload: ChatInput) -> ChatReply:
     # generate() returns the prompt followed by the answer; keep only the new tokens.
     new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
     reply = _tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-    return ChatReply(reply=reply)
+    return ChatReply(reply="".join(_guard_language(iter([reply]), payload.message)).strip())
