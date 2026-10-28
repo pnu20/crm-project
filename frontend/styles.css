@@ -52,3 +52,5 @@
 .ai-form{display:flex;gap:8px;align-items:flex-end;padding:12px;border-top:1px solid #e8ebe5}.ai-form textarea{flex:1;resize:none;max-height:120px;border:1px solid #e8ebe5;border-radius:8px;padding:9px 11px;font:inherit;font-size:13px;color:#222927;background:#fff}.ai-send{border:0;border-radius:5px;min-height:38px;padding:0 14px;background:#26302b;color:#fff;font-size:12px;font-weight:700;cursor:pointer}.ai-send:disabled{opacity:.5;cursor:default}
 /* The sidebar sits on the right on small screens, so the AI button moves to the left corner. */
 @media(max-width:500px){.ai-fab,.ai-panel{inset-inline-end:auto;left:16px}.ai-fab{bottom:16px}.ai-panel{bottom:78px;width:calc(100vw - 94px)}}
+.brand-mark{background:#f5f6f2;padding:4px}.brand-mark img{width:100%;height:100%;object-fit:contain;display:block}.brand-dot{font-size:.62em;font-weight:700;letter-spacing:.04em}
+.auth-logo{display:flex;align-items:center}.auth-logo img{height:40px;width:auto;display:block}
