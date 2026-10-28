@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f6f2">
   <title>Withaq CRM</title>
-  <link rel="stylesheet" href="styles.css?v=37">
+  <link rel="icon" type="image/png" href="favicon.png?v=1">
+  <link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
   <section class="auth-screen" id="auth-screen" hidden aria-labelledby="auth-title">
     <div class="auth-panel">
-      <div class="auth-top"><a class="brand" href="#"><span class="brand-mark">w.</span><span>withaq<span class="brand-dot">.</span></span></a><button class="button button-light" id="auth-language-toggle" type="button" aria-label="Switch language">العربية</button></div>
+      <div class="auth-top"><a class="auth-logo" href="#"><img src="logo.png?v=1" alt="Withaq CRM"></a><button class="button button-light" id="auth-language-toggle" type="button" aria-label="Switch language">العربية</button></div>
       <div class="auth-intro"><div class="eyebrow">CRM WORKSPACE</div><h1 id="auth-title">Sign in</h1><p id="auth-description">Welcome back. Sign in to continue to your CRM.</p></div>
       <form id="auth-form" class="auth-form">
         <label class="auth-field">Email address<input name="email" type="email" autocomplete="username" required placeholder="you@company.com"></label>
@@ -23,7 +24,7 @@
   </section>
   <div class="app-shell" id="app-shell" hidden>
     <aside class="sidebar" aria-label="Main navigation">
-      <a class="brand" href="#dashboard"><span class="brand-mark">w.</span><span>withaq<span class="brand-dot">.</span></span></a>
+      <a class="brand" href="#dashboard"><span class="brand-mark"><img src="logo-mark.png?v=1" alt=""></span><span>Withaq<span class="brand-dot"> CRM</span></span></a>
       <div class="workspace-label">WORKSPACE</div>
       <nav class="nav-list"><button class="nav-item active" data-view="dashboard"><span class="nav-icon">▦</span>Overview</button><button class="nav-item" data-view="contacts"><span class="nav-icon">♙</span>Contacts <span class="nav-count" id="contact-count">0</span></button><button class="nav-item" data-view="deals"><span class="nav-icon">◈</span>Deals</button><button class="nav-item" data-view="tasks"><span class="nav-icon">☷</span>Tasks <span class="nav-count" id="task-count">0</span></button><button class="nav-item" data-view="chat"><span class="nav-icon">✦</span>withaqChat</button><button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</button></nav>
       <div class="sidebar-bottom"><div class="sidebar-note"><span>✳</span><strong>A little progress,<br>every day.</strong><span>Keep your relationships moving.</span></div><div class="profile-row"><button class="profile-button" id="profile-button"><span class="avatar avatar-coral">JD</span><span class="profile-copy"><strong>Jamie Davis</strong><small>Admin</small></span></button><button class="profile-menu-toggle" id="account-menu-toggle" type="button" title="Account options" aria-label="Account options" aria-expanded="false">···</button></div><div class="account-menu" id="account-menu" hidden><button id="account-menu-logout" type="button">⇥ <span>Sign out</span></button></div></div>
