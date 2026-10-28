@@ -8,7 +8,7 @@ import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -28,8 +28,10 @@ SYSTEM_PROMPT = (
     "For any question about how Withaq CRM works, answer only from the reference below. "
     "If the reference does not cover it, say you are not sure the system supports that and suggest "
     "contacting the system administrator. Never invent features, buttons, or settings.\n"
+    "If the user says they did not understand your previous answer, explain it again more simply "
+    "in the user's language. "
     "If the question is unclear or uses a word you do not understand, do not guess: "
-    "ask the user in one short sentence to rephrase it in other words.\n"
+    "ask the user, in one short sentence in their language, to rephrase it in other words.\n"
     "You may also help with general sales and customer-relationship questions, "
     "such as writing a follow-up message.\n"
     "You cannot see or change the user's CRM data. To add, edit, or delete records, "
@@ -41,6 +43,8 @@ SYSTEM_PROMPT = (
     "that you cannot see passwords and suggest contacting the system administrator."
 )
 REMOTE_TIMEOUT_SECONDS = 60
+# Earlier messages kept for context: four questions and their answers.
+MAX_HISTORY_TURNS = 8
 # Low randomness keeps Qwen from drifting into Chinese mid-reply.
 REMOTE_TEMPERATURE = 0.3
 # Repeated after the long reference, where the model pays the most attention.
@@ -65,11 +69,20 @@ _max_new_tokens = 512
 _generation_lock = threading.Lock()
 
 
-# Request schema for a single chat question.
+# One earlier message in the conversation, sent back by the frontend for context.
+class ChatTurn(BaseModel):
+    """Validate a previous user question or assistant answer."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+# Request schema for a chat question and the recent conversation before it.
 class ChatInput(BaseModel):
-    """Validate the user's chat message."""
+    """Validate the user's chat message and the optional history."""
 
     message: str = Field(min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
 # Response schema returned by the chat endpoint.
@@ -137,11 +150,13 @@ def _build_system_prompt() -> str:
 
 
 # Shared conversation sent to either the hosted API or the local model.
-def _messages(message: str) -> list[dict[str, str]]:
-    """Wrap the user's message with the CRM system prompt."""
+def _messages(payload: ChatInput) -> list[dict[str, str]]:
+    """Wrap the recent conversation and the new question with the CRM system prompt."""
+    history = [{"role": turn.role, "content": turn.content.strip()} for turn in payload.history]
     return [
         {"role": "system", "content": _system_prompt},
-        {"role": "user", "content": message.strip()},
+        *history,
+        {"role": "user", "content": payload.message.strip()},
     ]
 
 
@@ -153,12 +168,12 @@ def _require_chat() -> None:
 
 
 # Open a request to the OpenAI-compatible chat completions endpoint.
-def _remote_request(message: str, stream: bool):
+def _remote_request(payload: ChatInput, stream: bool):
     """Send the conversation to the hosted API and return the open HTTP response."""
     body = json.dumps(
         {
             "model": _remote["model"],
-            "messages": _messages(message),
+            "messages": _messages(payload),
             "max_tokens": _max_new_tokens,
             "temperature": REMOTE_TEMPERATURE,
             "stream": stream,
@@ -225,9 +240,9 @@ def _guard_language(pieces: Iterator[str], message: str) -> Iterator[str]:
 
 
 # Turn a user message into model-ready tensors for the local model.
-def _prompt_inputs(message: str):
+def _prompt_inputs(payload: ChatInput):
     """Apply the chat template to the message and tokenize it for generation."""
-    prompt = _tokenizer.apply_chat_template(_messages(message), tokenize=False, add_generation_prompt=True)
+    prompt = _tokenizer.apply_chat_template(_messages(payload), tokenize=False, add_generation_prompt=True)
     return _tokenizer([prompt], return_tensors="pt").to(_model.device)
 
 
@@ -247,11 +262,11 @@ def chat_stream(payload: ChatInput) -> StreamingResponse:
     headers = {"X-Accel-Buffering": "no"}
     if _remote is not None:
         # Open the request before streaming starts so a failure still returns an error status.
-        response = _remote_request(payload.message, stream=True)
+        response = _remote_request(payload, stream=True)
         pieces = _guard_language(_remote_pieces(response), payload.message)
         return StreamingResponse(pieces, media_type="text/plain; charset=utf-8", headers=headers)
 
-    inputs = _prompt_inputs(payload.message)
+    inputs = _prompt_inputs(payload)
 
     import torch
     from transformers import TextIteratorStreamer
@@ -277,12 +292,12 @@ def chat(payload: ChatInput) -> ChatReply:
     """Return the whole generated reply at once."""
     _require_chat()
     if _remote is not None:
-        with _remote_request(payload.message, stream=False) as response:
+        with _remote_request(payload, stream=False) as response:
             result = json.load(response)
         reply = result["choices"][0]["message"]["content"].strip()
         return ChatReply(reply="".join(_guard_language(iter([reply]), payload.message)).strip())
 
-    inputs = _prompt_inputs(payload.message)
+    inputs = _prompt_inputs(payload)
 
     import torch
 
