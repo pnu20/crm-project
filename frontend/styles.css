@@ -81,3 +81,12 @@ th{background:#f8fafc;color:var(--muted)}td{border-bottom-color:#eef2f6}body tr:
 input:focus,.form-grid select:focus{border-color:var(--primary);box-shadow:0 0 0 3px #00754f26;outline:none}
 .app-dialog{border-color:var(--line);border-radius:16px}.account-menu{border-color:var(--line);border-radius:12px}
 .ai-fab,.ai-head{background:linear-gradient(135deg,#00875b,#013b28)}.ai-fab:hover,.ai-fab[aria-expanded="true"]{background:linear-gradient(135deg,#009966,#015c3e)}.ai-fab,.ai-head strong::before{color:#fff}.ai-panel{border-radius:16px;border-color:var(--line)}
+/* withaqChat in the logo's green gradient: dark on the right, fading down and to the left. */
+.chat-screen{background:linear-gradient(250deg,#01251a 0%,#013a29 40%,#005c3e 75%,#006645 100%);color:#ecfdf5}
+.chat-welcome h1{color:#fff}.chat-welcome p{color:#a7d7c1}.chat-assistant{color:#e6f6ee}.chat-pending{color:#86bfa5}.chat-error{color:#fca5a5}
+.chat-new{border-color:#ffffff33;color:#ecfdf5;background:transparent}.chat-new:hover{background:#ffffff14}
+.chat-user{background:linear-gradient(135deg,#00a06b,#00754f);color:#fff;box-shadow:0 4px 14px #0000002e}
+.chat-form{background:#ffffff14;border-color:#ffffff2e;backdrop-filter:blur(6px)}.chat-form:focus-within{border-color:#34d399}
+.chat-form textarea{color:#f0fdf4}.chat-form textarea::placeholder{color:#9fd3bb}
+.chat-send{background:linear-gradient(135deg,#34d399,#00875b);color:#fff}
+.chat-chips button{background:#ffffff14;border-color:#ffffff2e;color:#ecfdf5}.chat-chips button:hover{border-color:#34d399;background:#34d39926;color:#fff}
