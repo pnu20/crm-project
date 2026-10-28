@@ -149,15 +149,26 @@ echo "   API healthy on port $API_PORT"
 
 # ---------------------------------------------------------------- old services
 log "Disabling older uvicorn services for this app"
+# Only services that run this project directory: staging runs the same app from another
+# directory (withaq-staging-api) and must keep running.
 for unit in $(systemctl list-units --type=service --all --no-legend --plain | awk '{print $1}'); do
   [[ "$unit" == "$SERVICE_NAME.service" ]] && continue
-  if systemctl cat "$unit" 2>/dev/null | grep -q 'backend.main:app'; then
+  unit_text="$(systemctl cat "$unit" 2>/dev/null || true)"
+  if grep -q 'backend.main:app' <<<"$unit_text" \
+    && grep -qE "^WorkingDirectory=$PROJECT_DIR/?(backend/?)?\$" <<<"$unit_text"; then
     systemctl disable --now "$unit" >/dev/null 2>&1 && echo "   Disabled $unit"
   fi
 done
-if pgrep -af 'uvicorn .*backend.main:app' | grep -v -- "--port $API_PORT" >/dev/null; then
+stray=""
+for pid in $(pgrep -f 'uvicorn .*backend.main:app' || true); do
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ "$cwd" == "$PROJECT_DIR" || "$cwd" == "$PROJECT_DIR/backend" ]] || continue
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q -- "--port $API_PORT" && continue
+  stray+="   $pid $(tr '\0' ' ' < "/proc/$pid/cmdline")"$'\n'
+done
+if [[ -n "$stray" ]]; then
   warn "A manually started uvicorn is still running (not managed by systemd):"
-  pgrep -af 'uvicorn .*backend.main:app' | grep -v -- "--port $API_PORT" || true
+  printf '%s' "$stray"
   warn "Stop it with: sudo kill <PID>   (Nginx no longer sends traffic to it)"
 fi
 
