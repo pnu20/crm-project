@@ -90,3 +90,6 @@ input:focus,.form-grid select:focus{border-color:var(--primary);box-shadow:0 0 0
 .chat-form textarea{color:#f0fdf4}.chat-form textarea::placeholder{color:#9fd3bb}
 .chat-send{background:linear-gradient(135deg,#34d399,#00875b);color:#fff}
 .chat-chips button{background:#ffffff14;border-color:#ffffff2e;color:#ecfdf5}.chat-chips button:hover{border-color:#34d399;background:#34d39926;color:#fff}
+/* Withaq AI panel: quick replies on the white panel. */
+.ai-chips button{background:#fff;border-color:var(--line);color:var(--ink)}
+.ai-chips button:hover{border-color:var(--primary);background:var(--primary-soft);color:var(--primary)}
