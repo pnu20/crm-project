@@ -205,6 +205,8 @@ def _remote_request(payload: ChatInput, stream: bool):
             "max_tokens": _max_new_tokens,
             "temperature": REMOTE_TEMPERATURE,
             "stream": stream,
+            # OpenRouter otherwise favours the cheapest host, which can take several seconds to start replying.
+            "provider": {"sort": "latency"},
         }
     ).encode("utf-8")
     request = urllib.request.Request(
