@@ -34,8 +34,9 @@ SYSTEM_PROMPT = (
     "ask the user, in one short sentence in their language, to rephrase it in other words.\n"
     "You may also help with general sales and customer-relationship questions, "
     "such as writing a follow-up message.\n"
-    "You cannot see or change the user's CRM data. To add, edit, or delete records, "
-    "point the user to the relevant page or to withaqChat.\n"
+    "You cannot see the user's CRM data. To add a contact, deal, or task, complete a task, move a deal, "
+    "or delete a contact, tell the user to type a clear command here, such as \"أضف صفقة\" or \"add a task\", "
+    "or to use the relevant page or withaqChat.\n"
     "For any question unrelated to Withaq CRM, sales, or customer service, whatever the topic "
     "(weather, news, sports, people, politics, religion, general knowledge, and so on), never answer it, "
     "not even partly, and never mention any fact about it. "
@@ -60,6 +61,24 @@ LANGUAGE_REMINDER = (
     "If the question is not about Withaq CRM, sales, or customer service, reply only with the fixed "
     "sentence given above and answer nothing else."
 )
+OUT_OF_SCOPE_AR = "أنا مساعد مخصص لـ Withaq CRM والمبيعات وخدمة العملاء فقط."
+OUT_OF_SCOPE_EN = "I can only help with Withaq CRM, sales, and customer service."
+# Worked examples sent before the real conversation: small models copy examples far more
+# reliably than they follow written rules, especially for refusing off-topic questions.
+EXAMPLE_TURNS = [
+    {"role": "user", "content": "من هو مؤسس السعودية؟"},
+    {"role": "assistant", "content": OUT_OF_SCOPE_AR},
+    {"role": "user", "content": "كيف أضيف صفقة جديدة؟"},
+    {
+        "role": "assistant",
+        "content": "اضغط «إضافة صفقة»، وأدخل اسم الصفقة، واختر جهة الاتصال، والقيمة، والعملة، والمرحلة، "
+        "ثم اضغط «حفظ الصفقة».",
+    },
+    {"role": "user", "content": "Who won the match yesterday?"},
+    {"role": "assistant", "content": OUT_OF_SCOPE_EN},
+    {"role": "user", "content": "وش أفضل مطعم في الرياض؟"},
+    {"role": "assistant", "content": OUT_OF_SCOPE_AR},
+]
 # Chinese, Japanese, and Korean characters, including full-width punctuation such as "，" and "。".
 FOREIGN_SCRIPT = re.compile(r"[　-ヿ㐀-䶿一-鿿가-힯＀-￯]")
 ARABIC_SCRIPT = re.compile(r"[؀-ۿ]")
@@ -163,6 +182,7 @@ def _messages(payload: ChatInput) -> list[dict[str, str]]:
     history = [{"role": turn.role, "content": turn.content.strip()} for turn in payload.history]
     return [
         {"role": "system", "content": _system_prompt},
+        *EXAMPLE_TURNS,
         *history,
         {"role": "user", "content": payload.message.strip()},
     ]
