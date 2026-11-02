@@ -36,7 +36,7 @@ SYSTEM_PROMPT = (
     "such as writing a follow-up message.\n"
     "You cannot see the user's CRM data. To add a contact, deal, or task, complete a task, move a deal, "
     "or delete a contact, tell the user to type a clear command here, such as \"أضف صفقة\" or \"add a task\", "
-    "or to use the relevant page or withaqChat.\n"
+    "or to use the relevant page.\n"
     "For any question unrelated to Withaq CRM, sales, or customer service, whatever the topic "
     "(weather, news, sports, people, politics, religion, general knowledge, and so on), never answer it, "
     "not even partly, and never mention any fact about it. "
@@ -54,6 +54,8 @@ REMOTE_TIMEOUT_SECONDS = 60
 MAX_HISTORY_TURNS = 8
 # Low randomness keeps Qwen from drifting into Chinese mid-reply.
 REMOTE_TEMPERATURE = 0.3
+# Above 1 discourages reusing the same words, which stops small models looping on one phrase.
+REPETITION_PENALTY = 1.15
 # Repeated after the long reference, where the model pays the most attention.
 LANGUAGE_REMINDER = (
     "Reminder: write the whole reply in the user's language, Arabic or English only. "
@@ -204,6 +206,7 @@ def _remote_request(payload: ChatInput, stream: bool):
             "messages": _messages(payload),
             "max_tokens": _max_new_tokens,
             "temperature": REMOTE_TEMPERATURE,
+            "repetition_penalty": REPETITION_PENALTY,
             "stream": stream,
             # OpenRouter otherwise favours the cheapest host, which can take several seconds to start replying.
             "provider": {"sort": "latency"},
@@ -306,7 +309,7 @@ def chat_stream(payload: ChatInput) -> StreamingResponse:
     def generate() -> None:
         try:
             with _generation_lock, torch.inference_mode():
-                _model.generate(**inputs, max_new_tokens=_max_new_tokens, streamer=streamer)
+                _model.generate(**inputs, max_new_tokens=_max_new_tokens, repetition_penalty=REPETITION_PENALTY, streamer=streamer)
         except Exception:
             logger.exception("Chat generation failed")
             # generate() only closes the stream on success; close it here so the response ends.
@@ -332,7 +335,7 @@ def chat(payload: ChatInput) -> ChatReply:
     import torch
 
     with _generation_lock, torch.inference_mode():
-        output_ids = _model.generate(**inputs, max_new_tokens=_max_new_tokens)
+        output_ids = _model.generate(**inputs, max_new_tokens=_max_new_tokens, repetition_penalty=REPETITION_PENALTY)
 
     # generate() returns the prompt followed by the answer; keep only the new tokens.
     new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
